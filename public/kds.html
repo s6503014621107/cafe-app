@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>KDS - Barista</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    button { margin: 0 4px; }
+  </style>
+</head>
+<body>
+  <h1>Kitchen Display System (KDS)</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Table</th>
+        <th>Items</th>
+        <th>Status</th>
+        <th>Created At</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="orders"></tbody>
+  </table>
+
+  <script>
+    async function loadOrders() {
+      const res = await fetch('/api/orders');
+      const data = await res.json();
+      const tbody = document.getElementById('orders');
+      tbody.innerHTML = '';
+
+      data.forEach(order => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${order.id}</td>
+          <td>${order.table}</td>
+          <td>${order.items.join(', ')}</td>
+          <td>${order.status}</td>
+          <td>${new Date(order.createdAt).toLocaleString()}</td>
+          <td>
+            <button onclick="updateStatus(${order.id}, 'BREWING')">Brewing</button>
+            <button onclick="updateStatus(${order.id}, 'READY')">Ready</button>
+            <button onclick="updateStatus(${order.id}, 'SERVED')">Served</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function updateStatus(id, status) {
+      await fetch(`/api/orders/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      loadOrders();
+    }
+
+    // โหลดทุก 5 วินาที
+    setInterval(loadOrders, 5000);
+    loadOrders();
+  </script>
+</body>
+</html>
