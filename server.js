@@ -21,7 +21,7 @@ try {
       token: process.env.INFLUX_TOKEN,
     });
     writeApi = influx.getWriteApi(process.env.INFLUX_ORG, process.env.INFLUX_BUCKET, 'ns');
-    global.InfluxPoint = Point; // ใช้ด้านล่าง
+    global.InfluxPoint = Point;
     console.log('[InfluxDB] ready:', process.env.INFLUX_URL);
   } else {
     console.log('[InfluxDB] skip (config not ready)');
@@ -30,7 +30,7 @@ try {
   console.warn('[InfluxDB] disabled:', e.message);
 }
 
-// ===== เมนูตัวอย่าง (ปรับตามร้านของคุณ) =====
+// ===== เมนูตัวอย่าง =====
 const MENU = [
   { id: 'm01', name: 'มัทฉะ (เย็น)', type: 'tea',     price: 69 },
   { id: 'm02', name: 'ชาดอกเก๊กฮวย (เย็น)', type: 'tea', price: 49 },
@@ -47,13 +47,11 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ===== ที่เก็บออเดอร์ในหน่วยความจำ (demo) =====
-// *รีสตาร์ตโปรเซสแล้วออเดอร์จะหาย — ใช้ทำ KDS ขั้นแรก
+// ===== ที่เก็บออเดอร์ในหน่วยความจำ =====
 let ORDERS = [];
 let NEXT_ID = 1;
 
 // ===== Helper: normalize items =====
-// รองรับทั้งรูปแบบ ["m01","m02"] และ [{id:"m01", qty:2}]
 function normalizeItems(items) {
   if (!Array.isArray(items)) return [];
   return items.map((it) => {
@@ -62,9 +60,13 @@ function normalizeItems(items) {
   });
 }
 
+// ===== API: เมนู (ลูกค้าจะเรียกใช้งานตรงนี้) =====
+app.get('/api/menu', (req, res) => {
+  res.json(MENU);
+});
+
 // ===== API: ลูกค้าส่งออเดอร์ =====
-// ทำเป็น handler เดียว แล้วผูกกับทั้ง /api/orders และ /api/order
-async function handleCreateOrder(req, res) {
+app.post('/api/orders', async (req, res) => {
   try {
     const table = String(req.body.table || 'NA');
     const rawItems = normalizeItems(req.body.items || []);
@@ -98,12 +100,11 @@ async function handleCreateOrder(req, res) {
     };
     ORDERS.unshift(order);
 
-    console.log(`[ORDER] new: #${order.id} ${order.code} table=${order.table} items=${order.items.join(', ')}`);
-
-    // เขียน InfluxDB (ต่อรายการ) ถ้าตั้งค่าไว้
+    // เขียน InfluxDB (ถ้าตั้งค่าไว้)
     if (writeApi && global.InfluxPoint) {
-      const points = detail.map((d) =>
-        new global.InfluxPoint('orders')
+      const points = [];
+      for (const d of detail) {
+        const p = new global.InfluxPoint('orders')
           .tag('orderCode', code)
           .tag('table', table)
           .tag('status', 'received')
@@ -111,13 +112,16 @@ async function handleCreateOrder(req, res) {
           .tag('type', d.type)
           .intField('qty', d.qty)
           .floatField('price', d.price)
-          .floatField('amount', d.price * d.qty)
-      );
-      try {
-        writeApi.writePoints(points);
-        await writeApi.flush();
-      } catch (e) {
-        console.error('[Influx write]', e.message);
+          .floatField('amount', d.price * d.qty);
+        points.push(p);
+      }
+      if (points.length) {
+        try {
+          writeApi.writePoints(points);
+          await writeApi.flush();
+        } catch (e) {
+          console.error('[Influx write]', e.message);
+        }
       }
     }
 
@@ -126,9 +130,7 @@ async function handleCreateOrder(req, res) {
     console.error(e);
     res.status(500).json({ ok: false, error: 'server error' });
   }
-}
-// ผูกกับทั้งพหูพจน์/เอกพจน์
-app.post(['/api/orders', '/api/order'], handleCreateOrder);
+});
 
 // ===== API: KDS ดึงรายการออเดอร์ =====
 app.get('/api/orders', (req, res) => {
@@ -147,7 +149,7 @@ app.patch('/api/orders/:id/status', (req, res) => {
   res.json({ ok: true, order: o });
 });
 
-// ===== Health (เช็คง่าย ๆ) =====
+// ===== Health check =====
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 // ===== Start =====
