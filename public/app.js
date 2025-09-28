@@ -1,221 +1,220 @@
-// ====== CONFIG / STATE ======
-const API = {
-  menu: '/api/menu',
-  orders: '/api/orders',
+// ---------- Globals ----------
+const $ = (s, p=document) => p.querySelector(s);
+const $$ = (s, p=document) => Array.from(p.querySelectorAll(s));
+
+const state = {
+  menu: [],
+  filtered: [],
+  tab: 'all',
+  cart: [], // {id, name, price, qty}
 };
 
-const el = {
-  grid:    document.getElementById('grid'),
-  tabs:    document.getElementById('tabs'),
-  search:  document.getElementById('search'),
-  cartBtn: document.getElementById('cartBtn'),
-  toast:   document.getElementById('toast'),
-};
+// ---------- UI refs ----------
+const tabs = $('#tabs');
+const search = $('#search');
+const grid = $('#grid');
+const cartBtn = $('#cartBtn');
+const overlay = $('#overlay');
+const drawer = $('#drawer');
+const closeDrawer = $('#closeDrawer');
+const cartList = $('#cartList');
+const cartTotal = $('#cartTotal');
+const placeOrder = $('#placeOrder');
+const backHome = $('#backHome');
+const toast = $('#toast');
 
-const TYPE_LABEL = {
-  all: 'รายการทั้งหมด',
-  coffee: 'กาแฟ',
-  tea: 'ชา/ชาสมุนไพร',
-  juice: 'น้ำผลไม้',
-  soda: 'โซดา/น้ำอัดลม',
-  smoothie: 'ปั่น',
-};
+const inpName = $('#inpName');
+const inpPhone = $('#inpPhone');
+const inpDept = $('#inpDept');
+const inpPickup = $('#inpPickup');
+const inpTable = $('#inpTable');
 
-let MENU = [];
-let FILTER = { type: 'all', q: '' };
-const CART = new Map(); // Map<id, qty>
-
-// ====== UTIL ======
-const $ = (sel, root = document) => root.querySelector(sel);
-const fmtBaht = (n) => '฿' + Number(n || 0).toLocaleString('th-TH');
-
-function showToast(msg) {
-  if (!el.toast) { alert(msg); return; }
-  el.toast.textContent = msg;
-  el.toast.style.opacity = '1';
-  el.toast.style.transform = 'translateY(0)';
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => {
-    el.toast.style.opacity = '0';
-    el.toast.style.transform = 'translateY(10px)';
-  }, 1800);
+// ---------- Utils ----------
+function showToast(msg){
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(()=>toast.classList.remove('show'), 1800);
 }
 
-function updateCartBadge() {
-  const count = [...CART.values()].reduce((s, x) => s + x, 0);
-  if (el.cartBtn) el.cartBtn.textContent = `ตะกร้า (${count})`;
+function openDrawer(){
+  overlay.classList.remove('hidden');
+  drawer.classList.remove('hidden');
+  requestAnimationFrame(()=>{
+    overlay.classList.add('show');
+    drawer.classList.add('show');
+  });
+  renderCart();
 }
 
-function getUrlTable() {
-  const url = new URL(location.href);
-  const t = (url.searchParams.get('table') || '').trim();
-  return t || null;
+function closeDrawerFn(){
+  overlay.classList.remove('show');
+  drawer.classList.remove('show');
+  setTimeout(()=>{
+    overlay.classList.add('hidden');
+    drawer.classList.add('hidden');
+  }, 250);
 }
 
-function validateTable(t) {
-  // อนุญาต A-Z0-9 ขีดกลาง ไม่เกิน 10 ตัวอักษร (ปรับได้)
-  return /^[A-Za-z0-9-]{1,10}$/.test(t);
-}
+overlay.addEventListener('click', closeDrawerFn);
+closeDrawer.addEventListener('click', closeDrawerFn);
+backHome.addEventListener('click', closeDrawerFn);
 
-// ====== MENU LOAD & RENDER ======
-async function loadMenu() {
-  try {
-    const res = await fetch(API.menu, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`menu http ${res.status}`);
-    MENU = await res.json();
+cartBtn.addEventListener('click', openDrawer);
 
-    renderTabs();
-    renderGrid();
-    bindSearch();
-    updateCartBadge();
-  } catch (e) {
-    console.error(e);
-    showToast('โหลดเมนูไม่สำเร็จ ลองกด Ctrl+F5');
+// ---------- Load pickup time slots (every 15 min, next 2 hours) ----------
+(function buildPickupSlots(){
+  const start = new Date();
+  start.setMinutes(start.getMinutes() + 20); // +20 นาที จากตอนนี้
+  start.setSeconds(0,0);
+  while (start.getMinutes()%15 !== 0) start.setMinutes(start.getMinutes()+1);
+
+  for (let i=0;i<8;i++){
+    const hh = String(start.getHours()).padStart(2,'0');
+    const mm = String(start.getMinutes()).padStart(2,'0');
+    const opt = document.createElement('option');
+    opt.value = `${hh}:${mm}`;
+    opt.textContent = `${hh}:${mm}`;
+    inpPickup.appendChild(opt);
+    start.setMinutes(start.getMinutes()+15);
   }
+})();
+
+// ---------- Fetch menu ----------
+async function loadMenu(){
+  const res = await fetch('/api/menu');   // server.js ให้ /api/menu ไว้แล้ว
+  const menu = await res.json();
+  state.menu = menu;
+  state.filtered = menu;
+  renderTabs(menu);
+  renderGrid();
 }
 
-function renderTabs() {
-  if (!el.tabs) return;
-  const types = Array.from(new Set(MENU.map(m => m.type))).sort();
-  const entries = [{ key: 'all', label: TYPE_LABEL.all }, ...types.map(t => ({ key: t, label: TYPE_LABEL[t] || t }))];
-
-  el.tabs.innerHTML = entries.map(t =>
-    `<button class="tab ${FILTER.type === t.key ? 'active' : ''}" data-type="${t.key}">${t.label}</button>`
-  ).join('');
-
-  el.tabs.onclick = (ev) => {
-    const btn = ev.target.closest('button[data-type]');
-    if (!btn) return;
-    FILTER.type = btn.dataset.type;
-    [...el.tabs.children].forEach(b => b.classList.toggle('active', b === btn));
-    renderGrid();
-  };
-}
-
-function renderGrid() {
-  if (!el.grid) return;
-  const q = (FILTER.q || '').toLowerCase();
-  let items = MENU.slice();
-
-  if (FILTER.type !== 'all') items = items.filter(i => i.type === FILTER.type);
-  if (q) items = items.filter(i => i.name.toLowerCase().includes(q));
-
-  el.grid.innerHTML = items.map(cardHTML).join('');
-  el.grid.querySelectorAll('.add').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.closest('.card').dataset.id;
-      CART.set(id, (CART.get(id) || 0) + 1);
-      updateCartBadge();
-      showToast('เพิ่มลงตะกร้าแล้ว');
-    });
+function renderTabs(menu){
+  const types = Array.from(new Set(menu.map(m=>m.type)));
+  const all = [{key:'all', label:'รายการทั้งหมด'}, ...types.map(t=>({key:t,label:labelOf(t)}))];
+  tabs.innerHTML = '';
+  all.forEach(({key,label})=>{
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.className = key===state.tab?'active':'';
+    btn.onclick = ()=>{
+      state.tab = key;
+      filterMenu();
+      $$('.tabs button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+    };
+    tabs.appendChild(btn);
   });
 }
 
-function cardHTML(m) {
-  return `
-    <div class="card" data-id="${m.id}">
-      <div class="card__info">
-        <div class="card__name">${m.name}</div>
-        <div class="price">${fmtBaht(m.price)}</div>
+function labelOf(type){
+  const map = { coffee:'กาแฟ', tea:'ชา', juice:'น้ำผลไม้', smoothie:'ปั่น', soda:'โซดา/น้ำอัดลม' };
+  return map[type] || type;
+}
+
+function filterMenu(){
+  const q = search.value.trim().toLowerCase();
+  state.filtered = state.menu.filter(m=>{
+    const byTab = state.tab==='all' ? true : m.type===state.tab;
+    const byText = !q || m.name.toLowerCase().includes(q);
+    return byTab && byText;
+  });
+  renderGrid();
+}
+
+search.addEventListener('input', filterMenu);
+
+function renderGrid(){
+  grid.innerHTML = '';
+  state.filtered.forEach(m=>{
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="info">
+        <div class="name">${m.name}</div>
+        <div class="foot">
+          <div class="price">฿${m.price}</div>
+          <button class="btn" data-id="${m.id}">เพิ่ม</button>
+        </div>
       </div>
-      <div class="card__foot">
-        <button class="btn add">เพิ่ม</button>
+    `;
+    card.querySelector('button').onclick = ()=> addToCart(m.id);
+    grid.appendChild(card);
+  });
+}
+
+function addToCart(id){
+  const item = state.menu.find(x=>x.id===id);
+  if(!item) return;
+  const found = state.cart.find(c=>c.id===id);
+  if(found) found.qty += 1;
+  else state.cart.push({id:item.id, name:item.name, price:item.price, qty:1});
+  updateCartBadge();
+  showToast(`เพิ่ม ${item.name} ลงตะกร้าแล้ว`);
+}
+
+function updateCartBadge(){
+  const n = state.cart.reduce((s,c)=>s+c.qty,0);
+  cartBtn.textContent = `ตะกร้า (${n})`;
+}
+
+// ---------- Drawer / Cart ----------
+function renderCart(){
+  cartList.innerHTML = '';
+  state.cart.forEach(c=>{
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <div>
+        <div><strong>${c.name}</strong></div>
+        <div class="muted">฿${c.price}</div>
       </div>
-    </div>
-  `;
-}
-
-function bindSearch() {
-  if (!el.search) return;
-  el.search.addEventListener('input', () => {
-    FILTER.q = el.search.value.trim();
-    renderGrid();
+      <div class="qtyctl">
+        <button aria-label="minus">−</button>
+        <span>${c.qty}</span>
+        <button aria-label="plus">＋</button>
+        <button class="icon-btn" title="remove">🗑️</button>
+      </div>
+    `;
+    const [btnMinus, , btnPlus, btnDel] = row.querySelectorAll('button');
+    btnMinus.onclick = ()=>{ c.qty=Math.max(1,c.qty-1); renderCart(); updateCartBadge(); };
+    btnPlus.onclick = ()=>{ c.qty+=1; renderCart(); updateCartBadge(); };
+    btnDel.onclick  = ()=>{ state.cart = state.cart.filter(x=>x.id!==c.id); renderCart(); updateCartBadge(); };
+    cartList.appendChild(row);
   });
+
+  const total = state.cart.reduce((s,c)=>s+c.price*c.qty, 0);
+  cartTotal.textContent = '฿'+total;
 }
 
-// ====== CHECKOUT (ถามเลขโต๊ะ + ยืนยัน) ======
-function buildCartArray() {
-  return [...CART.entries()].map(([id, qty]) => ({ id, qty }));
-}
+// ---------- Submit order ----------
+placeOrder.addEventListener('click', async ()=>{
+  if(state.cart.length===0) return showToast('กรุณาเลือกสินค้า');
 
-function calcTotal(cart) {
-  let total = 0;
-  for (const { id, qty } of cart) {
-    const found = MENU.find(m => m.id === id);
-    if (found) total += (found.price || 0) * (qty || 1);
-  }
-  return total;
-}
+  const table = (inpTable.value || '').trim() || 'NA';
+  const items = state.cart.map(c=>({ id:c.id, qty:c.qty }));
 
-function cartSummaryText(cart) {
-  const lines = cart.map(({ id, qty }) => {
-    const f = MENU.find(m => m.id === id);
-    const name = f ? f.name : id;
-    const price = f ? f.price : 0;
-    return `• ${name} x${qty} (${fmtBaht(price * qty)})`;
-  });
-  return lines.join('\n');
-}
-
-async function submitOrder() {
-  const cart = buildCartArray();
-  if (cart.length === 0) { showToast('ยังไม่ได้เลือกเมนู'); return; }
-
-  // 1) หาเลขโต๊ะ: ?table= > localStorage > prompt
-  let table =
-    getUrlTable() ||
-    localStorage.getItem('twinkle.table') ||
-    '';
-
-  if (!validateTable(table)) {
-    table = prompt('กรุณากรอกเลขโต๊ะ (เช่น T1):', table || 'T1') || '';
-    table = table.trim();
-    if (!validateTable(table)) {
-      showToast('เลขโต๊ะไม่ถูกต้อง');
-      return;
-    }
-  }
-
-  // 2) สรุปรายการและยืนยัน
-  const total = calcTotal(cart);
-  const summary = cartSummaryText(cart);
-  const ok = confirm(
-    `ยืนยันสั่งออเดอร์สำหรับโต๊ะ: ${table}\n\n` +
-    `${summary}\n\nรวมทั้งสิ้น: ${fmtBaht(total)}\n\nยืนยันสั่งใช่ไหม?`
-  );
-  if (!ok) return;
-
-  // บันทึกเลขโต๊ะไว้รอบหน้า
-  localStorage.setItem('twinkle.table', table);
-
-  // 3) ยิง API
-  try {
-    el.cartBtn?.setAttribute('disabled', 'true');
-
-    const res = await fetch(API.orders, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({ table, items: cart }),
+  // ยิงไปยัง /api/orders
+  try{
+    const res = await fetch('/api/orders', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ table, items })
     });
     const data = await res.json();
+    if(!data.ok) throw new Error(data.error||'order failed');
 
-    if (!res.ok || !data.ok) {
-      throw new Error(data?.error || `HTTP ${res.status}`);
-    }
-
-    alert(`สั่งสำเร็จ!\nรหัสคำสั่งซื้อ: ${data.code}\nยอดรวม: ${fmtBaht(data.total)}`);
-    CART.clear();
+    // แจ้งเตือน + clear cart
+    showToast(`สั่งสำเร็จ! ออเดอร์: ${data.code} ยอดรวม ฿${data.total}`);
+    state.cart = [];
     updateCartBadge();
-  } catch (e) {
-    console.error(e);
-    alert('ส่งออเดอร์ไม่สำเร็จ กรุณาลองใหม่');
-  } finally {
-    el.cartBtn?.removeAttribute('disabled');
+    renderCart();
+    closeDrawerFn();
+  }catch(err){
+    console.error(err);
+    showToast('สั่งไม่สำเร็จ ลองใหม่อีกครั้ง');
   }
-}
-
-// ====== INIT ======
-window.addEventListener('DOMContentLoaded', () => {
-  el.cartBtn?.addEventListener('click', submitOrder);
-  loadMenu();
 });
+
+// ---------- Start ----------
+loadMenu();
