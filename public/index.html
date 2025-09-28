@@ -28,13 +28,8 @@
     <h1 class="page-title">สั่งล่วงหน้า ไม่ต้องรอ</h1>
     <p class="subtitle">เลือกหมวดหมู่หรือค้นหาเมนูที่ต้องการได้เลย</p>
 
-    <!-- Tabs -->
     <div id="tabs" class="tabs"></div>
-
-    <!-- Search -->
     <input id="search" class="search" placeholder="ค้นหาเมนูหรือชื่ออังกฤษ…">
-
-    <!-- Menu grid -->
     <section id="grid" class="grid"></section>
   </main>
 
@@ -43,17 +38,12 @@
     <div class="panel-inner">
       <div class="panel-header">
         <strong>ตะกร้าของฉัน</strong>
-        <div>
-          <button id="panelClose" class="icon-btn" aria-label="close">✕</button>
-        </div>
+        <button id="panelClose" class="icon-btn" aria-label="close">✕</button>
       </div>
 
-      <!-- รายการในตะกร้า -->
       <div id="cartList" class="cart-list"></div>
-
       <div class="divider"></div>
 
-      <!-- ฟอร์มข้อมูลลูกค้า -->
       <form id="orderForm" class="form">
         <h3 class="form-title">ข้อมูลการรับสินค้า</h3>
         <div class="field">
@@ -66,7 +56,7 @@
         </div>
         <div class="field">
           <label>แผนก/โต๊ะ (ถ้ามี)</label>
-          <input id="fDept" placeholder="เช่น แผนกบัญชี / โต๊ะ A3">
+          <input id="fDept" placeholder="เช่น HR/T2 หรือ โต๊ะ A3">
         </div>
         <div class="field">
           <label>เวลารับ (ถ้ามี)</label>
@@ -89,7 +79,6 @@
     </div>
   </aside>
 
-  <!-- Toast -->
   <div id="toast" class="toast"></div>
 
   <script defer src="app.js"></script>
