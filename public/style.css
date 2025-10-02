@@ -97,3 +97,27 @@ img{display:block;max-width:100%}
   background:#111827;color:#fff;padding:10px 14px;border-radius:12px;display:none
 }
 .toast.show{display:block}
+
+/* ==== แพตช์ UX เพิ่มเติม ==== */
+.primary[disabled], .secondary[disabled], .add[disabled]{
+  opacity:.6; cursor:not-allowed;
+}
+.add:active, .primary:active { transform: translateY(1px); }
+.add:focus-visible, .primary:focus-visible, .secondary:focus-visible, .icon-btn:focus-visible {
+  outline:none; box-shadow:0 0 0 4px var(--ring);
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0b1320; --card:#111827; --ink:#e5e7eb; --muted:#9ca3af;
+  }
+  .topbar{ background:#111827; box-shadow:0 1px 8px rgba(0,0,0,.35); }
+  .tabs button{ background:#0f172a; border-color:#223; color:#e5e7eb; }
+  .tabs button.active{ background:#e5e7eb; color:#111827; border-color:#e5e7eb; }
+  .card{ border-color:#223; }
+  .card .img{ background:#0f172a; }
+  .panel-inner{ background:#0f172a; color:#e5e7eb; }
+  .field input,.field select{ background:#0b1320; border-color:#223; color:#e5e7eb; }
+  .toast{ background:#0b1320; }
+}
