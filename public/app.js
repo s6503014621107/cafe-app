@@ -38,24 +38,26 @@ function normalizeMenuItem(raw){
   return { id: id!=null ? String(id) : '', name: name||'(ไม่มีชื่อ)', type: type.toLowerCase(), price, img };
 }
 
-// ------- Fetch menu with fallback -------
+// ------- Fetch menu (รองรับทั้ง {ok,menu} และ array) -------
 async function loadMenu(){
   try{
     const res = await fetch('/api/menu',{headers:{'Accept':'application/json'}});
     if(!res.ok) throw new Error('menu api');
     const raw = await res.json();
-    MENU = (Array.isArray(raw) ? raw.map(normalizeMenuItem) : []).filter(m=>m.id!=='');
-    if (!MENU.length) throw new Error('empty after normalize');
+    const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.menu) ? raw.menu : []);
+    MENU = arr.map(normalizeMenuItem).filter(m=>m.id!=='');
+    if (!MENU.length) throw new Error('empty menu');
   }catch(_){
+    // Fallback ให้ id ตรงกับ server (m01..m08)
     MENU = [
-      {id:'1', name:'มัทฉะ (เย็น)',     type:'tea',      price:69, img:''},
-      {id:'2', name:'ชาดอกเก๊กฮวย (เย็น)', type:'tea',      price:49, img:''},
-      {id:'3', name:'น้ำส้ม (เย็น)',       type:'juice',    price:45, img:''},
-      {id:'4', name:'อเมริกาโน่ (เย็น)',   type:'coffee',   price:55, img:''},
-      {id:'5', name:'ลาเต้ (เย็น)',        type:'coffee',   price:65, img:''},
-      {id:'6', name:'โค้กโคล่าไลท์ (เย็น)',type:'soda',     price:55, img:''},
-      {id:'7', name:'เลมอนโซดา (เย็น)',    type:'soda',     price:49, img:''},
-      {id:'8', name:'สตรอว์เบอร์รีปั่น',   type:'smoothie', price:59, img:''},
+      {id:'m01', name:'มัทฉะ (เย็น)',            type:'tea',      price:69, img:''},
+      {id:'m02', name:'ชาดอกเก๊กฮวย (เย็น)',     type:'tea',      price:49, img:''},
+      {id:'m03', name:'น้ำส้ม (เย็น)',            type:'juice',    price:45, img:''},
+      {id:'m04', name:'อเมริกาโน่ (เย็น)',        type:'coffee',   price:55, img:''},
+      {id:'m05', name:'ลาเต้ (เย็น)',             type:'coffee',   price:65, img:''},
+      {id:'m06', name:'โค้กโค้กซ่า (เย็น)',       type:'soda',     price:55, img:''},
+      {id:'m07', name:'เลมอนโซดา (เย็น)',         type:'soda',     price:49, img:''},
+      {id:'m08', name:'สตรอว์เบอร์รีปั่น',        type:'smoothie', price:59, img:''},
     ];
   }
   renderTabs();
@@ -151,7 +153,7 @@ function renderCart(){
   totalEl.textContent = THB(total);
 }
 
-// ------- Panel open/close (null-safe) -------
+// ------- Panel open/close -------
 cartBtn?.addEventListener('click', () => {
   if (!panel) return;
   renderCart();
@@ -166,20 +168,27 @@ form?.addEventListener('submit', async (e)=>{
   if (!CART.length) { showToast('ตะกร้าว่างเปล่า'); return; }
   if (CART.some(x=>!x.id)){ showToast('พบรายการที่ไม่มีรหัสสินค้า โปรดลบแล้วเพิ่มใหม่'); return; }
 
-  const items = CART.map(x=>{
-    const n = Number(x.id);
-    return { id: Number.isFinite(n) ? n : String(x.id), qty:x.qty };
-  });
+  // ✅ ส่ง id เป็น "สตริง" เสมอ + qty เป็นตัวเลข
+  const items = CART.map(x=>({ id: String(x.id), qty: Number(x.qty) }));
 
-  const table = (deptEl.value || nameEl.value || 'T1');
-  const payload = { table, items, meta:{
-    name:nameEl.value||'',
-    phone:phoneEl.value||'',
-    dept:deptEl.value||'',
-    pickup:pickupEl.value||''
-  }};
+  // ฟิลด์เสริมให้ server ใช้ (optional)
+  const tableNo = (deptEl?.value || nameEl?.value || 'T1') || '';
+  const customerName = (nameEl?.value || '') + (phoneEl?.value ? ` (${phoneEl.value})` : '');
+  const payload = {
+    items,
+    customerName,
+    tableNo,
+    meta:{
+      phone:phoneEl?.value||'',
+      dept:deptEl?.value||'',
+      pickup:pickupEl?.value||''
+    }
+  };
 
+  const submitBtn = form.querySelector('button[type="submit"]');
   try{
+    submitBtn && (submitBtn.disabled = true);
+
     const res = await fetch('/api/orders', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(payload)
@@ -189,13 +198,17 @@ form?.addEventListener('submit', async (e)=>{
     if(!res.ok || !data.ok) throw new Error(data?.error || `order failed (${res.status})`);
 
     CART = []; updateCartBtn(); renderCart(); panel?.classList.add('hidden');
-    const total = data.total ?? items.reduce((s,i)=>{
+
+    const total = data?.order?.total ?? items.reduce((s,i)=>{
       const m = MENU.find(mm=>String(mm.id)==String(i.id));
       return s + (m? Number(m.price)*i.qty : 0);
     },0);
+
     showToast(`สั่งสำเร็จ! ยอดรวม: ${THB(total)}`);
   }catch(err){
     console.error('[submit error]', err);
     showToast('สั่งซื้อไม่สำเร็จ กรุณาลองใหม่');
+  }finally{
+    submitBtn && (submitBtn.disabled = false);
   }
 });
