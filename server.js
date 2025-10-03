@@ -61,7 +61,7 @@ function normalizeItems(items) {
   });
 }
 
-// ===== API: เมนู (ลูกค้าจะเรียกใช้งานตรงนี้) =====
+// ===== API: เมนู =====
 app.get('/api/menu', (req, res) => {
   res.json(MENU);
 });
@@ -89,7 +89,7 @@ app.post('/api/orders', async (req, res) => {
     // สร้างรหัสออเดอร์
     const code = nanoid().toUpperCase();
 
-    // บันทึกลงหน่วยความจำเพื่อให้ KDS เห็น
+    // บันทึกลงหน่วยความจำ
     const order = {
       id: NEXT_ID++,
       code,
@@ -101,7 +101,7 @@ app.post('/api/orders', async (req, res) => {
     };
     ORDERS.unshift(order);
 
-    // ส่งไปยัง InfluxDB (ถ้าตั้งค่าไว้)
+    // ส่งไปยัง InfluxDB (ถ้ามี)
     if (writeApi && global.InfluxPoint) {
       const points = [];
       for (const d of detail) {
@@ -126,7 +126,7 @@ app.post('/api/orders', async (req, res) => {
       }
     }
 
-    // 🔔 broadcast order ใหม่ไป KDS ทุก client
+    // 🔔 broadcast order ใหม่ไป KDS
     clients.forEach(fn => fn(order));
 
     res.json({ ok: true, code, total });
@@ -136,7 +136,7 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
-// ===== API: KDS ดึงรายการออเดอร์ =====
+// ===== API: KDS ดึงออเดอร์ทั้งหมด =====
 app.get('/api/orders', (req, res) => {
   res.json(ORDERS);
 });
@@ -155,15 +155,17 @@ app.patch('/api/orders/:id/status', (req, res) => {
 
 // ===== SSE: KDS real-time stream =====
 app.get('/api/kds/stream', (req, res) => {
-  res.writeHead(200, {
+  res.set({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
   });
+  res.flushHeaders();
 
   // ส่ง event hello
   res.write(`event: hello\ndata: "connected"\n\n`);
 
+  // ฟังก์ชันส่ง order
   const send = (order) => {
     res.write(`event: order\ndata: ${JSON.stringify(order)}\n\n`);
   };
