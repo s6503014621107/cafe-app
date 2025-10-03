@@ -1,22 +1,30 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="th">
 <head>
   <meta charset="UTF-8">
-  <title>KDS - Barista</title>
+  <title>KDS - Twinkle Coffee</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-    th { background: #f4f4f4; }
-    button { margin: 0 4px; }
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:16px; }
+    h1 { margin:0 0 8px; }
+    #status { margin:0 0 16px; font-size:14px; opacity:.8; }
+    table { border-collapse:collapse; width:100%; }
+    th, td { border:1px solid #ccc; padding:8px; vertical-align:top; }
+    th { background:#f4f4f4; }
+    .items { line-height:1.5; }
+    .badge { padding:2px 6px; border-radius:999px; font-size:12px; border:1px solid #bbb; }
+    .actions button { margin:0 4px 4px 0; }
   </style>
 </head>
 <body>
   <h1>Kitchen Display System (KDS)</h1>
+  <div id="status">Connecting…</div>
+
   <table>
     <thead>
       <tr>
-        <th>ID</th>
+        <th>Order</th>
         <th>Table</th>
         <th>Items</th>
         <th>Status</th>
@@ -28,42 +36,76 @@
   </table>
 
   <script>
-    async function loadOrders() {
-      const res = await fetch('/api/orders');
-      const data = await res.json();
-      const tbody = document.getElementById('orders');
-      tbody.innerHTML = '';
+    const tbody = document.getElementById('orders');
+    const statusEl = document.getElementById('status');
+    const rows = new Map(); // order.id -> <tr>
 
-      data.forEach(order => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${order.id}</td>
-          <td>${order.table}</td>
-          <td>${order.items.join(', ')}</td>
-          <td>${order.status}</td>
-          <td>${new Date(order.createdAt).toLocaleString()}</td>
-          <td>
-            <button onclick="updateStatus(${order.id}, 'BREWING')">Brewing</button>
-            <button onclick="updateStatus(${order.id}, 'READY')">Ready</button>
-            <button onclick="updateStatus(${order.id}, 'SERVED')">Served</button>
-          </td>
-        `;
-        tbody.appendChild(tr);
-      });
+    function fmtItems(items){
+      return (items||[]).map(it => {
+        const note = it.note ? ` <em>(หมายเหตุ: ${it.note})</em>` : '';
+        return `• ${it.name} x${it.qty}${note}`;
+      }).join('<br>');
     }
 
-    async function updateStatus(id, status) {
-      await fetch(`/api/orders/${id}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status })
+    function render(order, { prepend=false } = {}){
+      let tr = rows.get(order.id);
+      if (!tr) { tr = document.createElement('tr'); rows.set(order.id, tr); }
+      tr.innerHTML = `
+        <td>
+          <div><strong>#${order.id}</strong> <span class="badge">${order.code || ''}</span></div>
+          <div>รวม: ฿${Number(order.total||0)}</div>
+        </td>
+        <td>${order.tableNo || order.table || '-'}</td>
+        <td class="items">${fmtItems(order.items)}</td>
+        <td>${order.status || '-'}</td>
+        <td>${order.createdAt ? new Date(order.createdAt).toLocaleString() : '-'}</td>
+        <td class="actions">
+          <button data-id="${order.id}" data-act="BREWING">Brewing</button>
+          <button data-id="${order.id}" data-act="READY">Ready</button>
+          <button data-id="${order.id}" data-act="SERVED">Served</button>
+        </td>
+      `;
+      tr.querySelectorAll('button[data-id]').forEach(btn=>{
+        btn.onclick = async () => {
+          const id = btn.dataset.id, status = btn.dataset.act;
+          const res = await fetch(`/api/orders/${id}/status`, {
+            method:'PATCH',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ status })
+          });
+          const data = await res.json();
+          if (data?.ok && data.order) render(data.order);
+          else alert(data?.error || 'Update failed');
+        };
       });
-      loadOrders();
+      if (!tr.isConnected) {
+        if (prepend && tbody.firstChild) tbody.insertBefore(tr, tbody.firstChild);
+        else tbody.appendChild(tr);
+      }
     }
 
-    // โหลดทุก 5 วินาที
-    setInterval(loadOrders, 5000);
-    loadOrders();
+    async function loadInitial(){
+      try{
+        const r = await fetch('/api/orders');
+        const j = await r.json();
+        const list = Array.isArray(j?.orders) ? j.orders : (Array.isArray(j) ? j : []);
+        tbody.innerHTML = '';
+        rows.clear();
+        list.forEach(o => render(o));
+      }catch(e){ console.error('loadInitial', e); }
+    }
+
+    // โหลดครั้งแรก
+    loadInitial();
+
+    // realtime via SSE
+    const es = new EventSource('/api/kds/stream');
+    es.addEventListener('hello', () => { statusEl.textContent = 'Connected'; });
+    es.addEventListener('order', ev => {
+      try { render(JSON.parse(ev.data), { prepend:true }); }
+      catch(e){ console.error('SSE parse', e); }
+    });
+    es.onerror = () => { statusEl.textContent = 'Disconnected — retrying…'; };
   </script>
 </body>
 </html>
