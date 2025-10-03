@@ -50,13 +50,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ===== ที่เก็บออเดอร์ในหน่วยความจำ =====
 let ORDERS = [];
 let NEXT_ID = 1;
+let clients = []; // สำหรับ SSE
 
 // ===== Helper: normalize items =====
 function normalizeItems(items) {
   if (!Array.isArray(items)) return [];
   return items.map((it) => {
     if (typeof it === 'string') return { id: it, qty: 1 };
-    return { id: it.id, qty: Number(it.qty || 1) };
+    return { id: String(it.id), qty: Number(it.qty || 1) };
   });
 }
 
@@ -78,7 +79,7 @@ app.post('/api/orders', async (req, res) => {
     let total = 0;
     const detail = [];
     for (const it of rawItems) {
-      const found = MENU.find((m) => m.id === it.id);
+      const found = MENU.find((m) => m.id === String(it.id));
       if (!found) return res.status(400).json({ ok: false, error: `Invalid item: ${it.id}` });
       const qty = it.qty > 0 ? it.qty : 1;
       total += found.price * qty;
@@ -100,7 +101,7 @@ app.post('/api/orders', async (req, res) => {
     };
     ORDERS.unshift(order);
 
-    // เขียน InfluxDB (ถ้าตั้งค่าไว้)
+    // ส่งไปยัง InfluxDB (ถ้าตั้งค่าไว้)
     if (writeApi && global.InfluxPoint) {
       const points = [];
       for (const d of detail) {
@@ -125,6 +126,9 @@ app.post('/api/orders', async (req, res) => {
       }
     }
 
+    // 🔔 broadcast order ใหม่ไป KDS ทุก client
+    clients.forEach(fn => fn(order));
+
     res.json({ ok: true, code, total });
   } catch (e) {
     console.error(e);
@@ -147,6 +151,28 @@ app.patch('/api/orders/:id/status', (req, res) => {
   if (!o) return res.status(404).json({ ok: false, error: 'Order not found' });
   o.status = status;
   res.json({ ok: true, order: o });
+});
+
+// ===== SSE: KDS real-time stream =====
+app.get('/api/kds/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+
+  // ส่ง event hello
+  res.write(`event: hello\ndata: "connected"\n\n`);
+
+  const send = (order) => {
+    res.write(`event: order\ndata: ${JSON.stringify(order)}\n\n`);
+  };
+
+  clients.push(send);
+
+  req.on('close', () => {
+    clients = clients.filter(fn => fn !== send);
+  });
 });
 
 // ===== Health check =====
