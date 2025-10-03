@@ -5,7 +5,7 @@ const path = require('path');
 const { customAlphabet } = require('nanoid');
 const nanoid = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
 
-// ===== InfluxDB (ทางเลือก) =====
+// ===== InfluxDB (optional) =====
 let writeApi = null;
 try {
   const haveInflux =
@@ -30,7 +30,7 @@ try {
   console.warn('[InfluxDB] disabled:', e.message);
 }
 
-// ===== เมนูตัวอย่าง =====
+// ===== Menu =====
 const MENU = [
   { id: 'm01', name: 'มัทฉะ (เย็น)', type: 'tea',     price: 69 },
   { id: 'm02', name: 'ชาดอกเก๊กฮวย (เย็น)', type: 'tea', price: 49 },
@@ -42,17 +42,17 @@ const MENU = [
   { id: 'm08', name: 'สตรอว์เบอร์รีปั่น',  type: 'smoothie', price: 59 },
 ];
 
-// ===== แอปหลัก =====
+// ===== Main app =====
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ===== ที่เก็บออเดอร์ในหน่วยความจำ =====
+// ===== Memory storage =====
 let ORDERS = [];
 let NEXT_ID = 1;
-let clients = []; // สำหรับ SSE
+let clients = []; // SSE clients
 
-// ===== Helper: normalize items =====
+// ===== Helpers =====
 function normalizeItems(items) {
   if (!Array.isArray(items)) return [];
   return items.map((it) => {
@@ -61,21 +61,22 @@ function normalizeItems(items) {
   });
 }
 
-// ===== API: เมนู =====
+// ===== API: Menu =====
 app.get('/api/menu', (req, res) => {
   res.json(MENU);
 });
 
-// ===== API: ลูกค้าส่งออเดอร์ =====
+// ===== API: Place Order =====
 app.post('/api/orders', async (req, res) => {
   try {
-    const table = String(req.body.table || 'NA');
+    // ✅ รองรับทั้ง table และ tableNo จาก client
+    const table = String(req.body.table || req.body.tableNo || 'NA');
     const rawItems = normalizeItems(req.body.items || []);
     if (rawItems.length === 0) {
       return res.status(400).json({ ok: false, error: 'No items' });
     }
 
-    // คิดเงิน + ตรวจเมนู
+    // Validate items & calculate total
     let total = 0;
     const detail = [];
     for (const it of rawItems) {
@@ -86,10 +87,10 @@ app.post('/api/orders', async (req, res) => {
       detail.push({ id: found.id, name: found.name, type: found.type, price: found.price, qty });
     }
 
-    // สร้างรหัสออเดอร์
+    // Generate order code
     const code = nanoid().toUpperCase();
 
-    // บันทึกลงหน่วยความจำ
+    // Build order
     const order = {
       id: NEXT_ID++,
       code,
@@ -101,7 +102,7 @@ app.post('/api/orders', async (req, res) => {
     };
     ORDERS.unshift(order);
 
-    // ส่งไปยัง InfluxDB (ถ้ามี)
+    // Write to InfluxDB if available
     if (writeApi && global.InfluxPoint) {
       const points = [];
       for (const d of detail) {
@@ -126,22 +127,22 @@ app.post('/api/orders', async (req, res) => {
       }
     }
 
-    // 🔔 broadcast order ใหม่ไป KDS
+    // 🔔 Broadcast to KDS
     clients.forEach(fn => fn(order));
 
-    res.json({ ok: true, code, total });
+    res.json({ ok: true, code, total, order });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: 'server error' });
   }
 });
 
-// ===== API: KDS ดึงออเดอร์ทั้งหมด =====
+// ===== API: List Orders =====
 app.get('/api/orders', (req, res) => {
   res.json(ORDERS);
 });
 
-// ===== API: KDS เปลี่ยนสถานะ =====
+// ===== API: Update Order Status =====
 app.patch('/api/orders/:id/status', (req, res) => {
   const id = parseInt(req.params.id, 10);
   const status = String(req.body.status || '').toUpperCase();
@@ -153,19 +154,16 @@ app.patch('/api/orders/:id/status', (req, res) => {
   res.json({ ok: true, order: o });
 });
 
-// ===== SSE: KDS real-time stream =====
+// ===== SSE: KDS =====
 app.get('/api/kds/stream', (req, res) => {
-  res.set({
+  res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
   });
-  res.flushHeaders();
 
-  // ส่ง event hello
   res.write(`event: hello\ndata: "connected"\n\n`);
 
-  // ฟังก์ชันส่ง order
   const send = (order) => {
     res.write(`event: order\ndata: ${JSON.stringify(order)}\n\n`);
   };
@@ -177,7 +175,7 @@ app.get('/api/kds/stream', (req, res) => {
   });
 });
 
-// ===== Health check =====
+// ===== Health =====
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 // ===== Start =====
